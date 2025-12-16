@@ -60,7 +60,8 @@ async def get_forum_topics(forum_url):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        response = requests.get(forum_url, headers=headers, timeout=10)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, lambda: requests.get(forum_url, headers=headers, timeout=10))
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
@@ -155,11 +156,11 @@ async def initialize_seen(forum_url, filename):
 
 # === Наблюдатели ===
 async def admin_watcher(application):
-    users = load_users()
     seen = await initialize_seen(ADMIN_COMPLAINTS_URL, SEEN_ADMIN_FILE)
     
     while True:
         try:
+            users = load_users()
             topics = await get_forum_topics(ADMIN_COMPLAINTS_URL)
             new_count = 0
             for title, link, topic_id in topics:
@@ -175,11 +176,11 @@ async def admin_watcher(application):
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def player_watcher(application):
-    users = load_users()
     seen = await initialize_seen(PLAYER_COMPLAINTS_URL, SEEN_PLAYER_FILE)
     
     while True:
         try:
+            users = load_users()
             topics = await get_forum_topics(PLAYER_COMPLAINTS_URL)
             new_count = 0
             for title, link, topic_id in topics:
@@ -304,7 +305,7 @@ async def player_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg[i:i+4000], parse_mode="HTML", disable_web_page_preview=True)
 
 # === Главная функция ===
-def main():
+async def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
@@ -312,19 +313,26 @@ def main():
     application.add_handler(CommandHandler("player", player_list))
     application.add_handler(CallbackQueryHandler(button_handler))
     
-    # Запускаем два наблюдателя параллельно
-    application.job_queue.run_repeating(
-        lambda ctx: asyncio.create_task(admin_watcher(application)),
-        interval=CHECK_INTERVAL,
-        first=0
-    )
-    application.job_queue.run_repeating(
-        lambda ctx: asyncio.create_task(player_watcher(application)),
-        interval=CHECK_INTERVAL,
-        first=5  # Сдвиг на 5 секунд
-    )
-    
-    application.run_polling()
+    # Запускаем наблюдателей как фоновые задачи
+    async with application:
+        await application.initialize()
+        await application.start()
+        
+        # Создаем фоновые задачи для наблюдателей
+        admin_task = asyncio.create_task(admin_watcher(application))
+        player_task = asyncio.create_task(player_watcher(application))
+        
+        await application.updater.start_polling()
+        
+        # Ждем завершения
+        try:
+            await asyncio.gather(admin_task, player_task)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            await application.updater.stop()
+            await application.stop()
+            await application.shutdown()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
