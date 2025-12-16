@@ -306,7 +306,7 @@ async def player_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === Главная функция ===
 async def main():
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = ApplicationBuilder().token(TOKEN).job_queue(None).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin_list))
@@ -336,3 +336,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
